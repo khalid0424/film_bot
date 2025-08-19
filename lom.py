@@ -5,8 +5,8 @@ import uuid
 import logging
 
 # Танзимоти бот
-BOT_TOKEN = "8028992264:AAGvvR6jGwHCSmOw4XFuLLkYRJx_h9HxKBg"
-ADMIN_ID = 5615452654  # ID-и админ
+BOT_TOKEN = "8308242423:AAG0_8nH30CUHMAqjT-6JGsq_lKcpr3vQtU"
+ADMIN_ID =  8105197501  # ID-и админ
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -95,8 +95,24 @@ def check_subscription(user_id, channel_id):
     try:
         member = bot.get_chat_member(channel_id, user_id)
         return member.status in ['member', 'administrator', 'creator']
-    except:
-        return False
+    except Exception as e:
+        # Агар канал пӯшида бошад ё бот дастрасӣ надошта бошад
+        # Барои каналҳои пӯшида, иҷозат медиҳем
+        # Барои каналҳои кушода, санҷиш мекунем
+        logger.warning(f"Натавонист обунаи корбарро санҷад: {e}")
+        
+        # Санҷиш оё канал кушода аст
+        try:
+            chat = bot.get_chat(channel_id)
+            if chat.type in ['channel', 'supergroup'] and chat.username:
+                # Канал кушода аст - бояд обуна бошад
+                return False
+            else:
+                # Канал пӯшида аст - иҷозат медиҳем
+                return True
+        except:
+            # Агар натавонист каналро санҷад, иҷозат медиҳем
+            return True
 
 # Санҷиши обуна ба ҳамаи каналҳо
 def check_all_subscriptions(user_id):
@@ -104,6 +120,7 @@ def check_all_subscriptions(user_id):
     if not channels:
         return True  # Агар канале набошад, ҳамаро иҷозат дода
     
+    # Санҷиши обуна ба ҳамаи каналҳо
     for channel_id, channel_name in channels:
         if not check_subscription(user_id, channel_id):
             return False
@@ -200,6 +217,87 @@ def search_movies_by_title(title):
     conn.close()
     return movies
 
+# Inline Mode Handler
+@bot.inline_handler(lambda query: True)
+def inline_query(inline_query):
+    try:
+        query_text = inline_query.query.strip()
+        results = []
+        
+        if query_text:
+            # Ҷустуҷӯи филмҳо бо ном
+            movies = search_movies_by_title(query_text)
+            
+            for i, movie in enumerate(movies[:10]):  # Максимум 10 натиҷа
+                try:
+                    # Сохтани InlineQueryResultArticle барои филмҳо
+                    result = types.InlineQueryResultArticle(
+                        id=str(i),
+                        title=f"🎬 {movie[3]}",  # Номи филм
+                        description=movie[4] if movie[4] else "Филм",  # Тавсиф
+                        input_message_content=types.InputTextMessageContent(
+                            message_text=f"🎬 **{movie[3]}**\n\n{movie[4] if movie[4] else 'Филм'}\n\n🔗 [Тамошои филм](https://t.me/{bot.get_me().username}?start={movie[1]})",
+                            parse_mode='Markdown'
+                        )
+                    )
+                    results.append(result)
+                except Exception as movie_error:
+                    logger.warning(f"Хатогӣ дар сохтани натиҷаи филм {i}: {movie_error}")
+                    continue
+        else:
+            # Агар ҳеҷ чиз навишта набошад, ҳамаи филмҳоро нишон диҳед
+            try:
+                movies = get_all_movies()
+                
+                for i, movie in enumerate(movies[:10]):
+                    try:
+                        result = types.InlineQueryResultArticle(
+                            id=str(i),
+                            title=f"🎬 {movie[3]}",
+                            description=movie[4] if movie[4] else "Филм",
+                            input_message_content=types.InputTextMessageContent(
+                                message_text=f"🎬 **{movie[3]}**\n\n{movie[4] if movie[4] else 'Филм'}\n\n🔗 [Тамошои филм](https://t.me/{bot.get_me().username}?start={movie[1]})",
+                                parse_mode='Markdown'
+                            )
+                        )
+                        results.append(result)
+                    except Exception as movie_error:
+                        logger.warning(f"Хатогӣ дар сохтани натиҷаи филм {i}: {movie_error}")
+                        continue
+            except Exception as get_movies_error:
+                logger.error(f"Хатогӣ дар гирифтани филмҳо: {get_movies_error}")
+        
+        # Фиристодани натиҷаҳо
+        if results:
+            bot.answer_inline_query(inline_query.id, results, cache_time=300)
+        else:
+            # Агар ҳеҷ натиҷае набошад, паёми хатогӣ фиристед
+            error_result = types.InlineQueryResultArticle(
+                id="no_results",
+                title="🔍 Ҳеҷ филме ёфт нашуд",
+                description="Лутфан номи дигаре санҷед",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="🔍 Ҳеҷ филме ёфт нашуд. Лутфан номи дигаре санҷед."
+                )
+            )
+            bot.answer_inline_query(inline_query.id, [error_result])
+        
+    except Exception as e:
+        logger.error(f"Хатогӣ дар Inline Query: {e}")
+        # Агар хатогӣ рӯй диҳад, паёми хатогӣ фиристед
+        try:
+            error_result = types.InlineQueryResultArticle(
+                id="error",
+                title="❌ Хатогӣ",
+                description="Хатогӣ дар ҷустуҷӯи филмҳо",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="❌ Хатогӣ дар ҷустуҷӯи филмҳо. Лутфан дубора кӯшиш кунед."
+                )
+            )
+            bot.answer_inline_query(inline_query.id, [error_result])
+        except Exception as final_error:
+            logger.error(f"Хатогӣ дар фиристодани паёми хатогӣ: {final_error}")
+
 # Обработчики команд
 @bot.message_handler(commands=['start'])
 def start_command(message):
@@ -248,7 +346,10 @@ def start_command(message):
             bot.send_message(
                 message.chat.id,
                 f"👋 Салом {message.from_user.first_name}!\n\n"
-                "Ман боти паҳши филм ҳастам. Барои тамошои филмҳо ба каналҳои мо обуна шавед!",
+                "Ман боти паҳши филм ҳастам. Барои тамошои филмҳо ба каналҳои мо обуна шавед!\n\n"
+                "💡 **Имкониятҳои нав:**\n"
+                "• Ҷустуҷӯи филмҳо дар ҳамаи чатҳо бо @username_bot\n"
+                "• Навиштани номи филм ва интихоби он",
                 reply_markup=get_main_keyboard(user_id)
             )
 
@@ -270,11 +371,42 @@ def show_subscription_requirement(message, movie_id=None):
                     bot.send_message(message.chat.id, "❌ Хатогӣ ҳангоми фиристодани филм.")
         return
     
+    # Санҷиши обуна барои каналҳои кушода
+    if movie_id:
+        if check_all_subscriptions(message.from_user.id):
+            # Корбар обуна шудааст, филмро фиристед
+            movie = get_movie(movie_id)
+            if movie:
+                try:
+                    bot.send_video(
+                        message.chat.id,
+                        movie[2],
+                        caption=f"🎬 {movie[3]}\n\n{movie[4]}"
+                    )
+                except:
+                    bot.send_message(message.chat.id, "❌ Хатогӣ ҳангоми фиристодани филм.")
+            return
+        else:
+            # Корбар обуна нашудааст, нишон додани каналҳо
+            pass
+    
     markup = types.InlineKeyboardMarkup()
     
     # Тугмаҳои обуна
     for channel_id, channel_name in channels:
-        channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+        try:
+            # Санҷиш оё канал кушода аст
+            chat = bot.get_chat(channel_id)
+            if chat.type in ['channel', 'supergroup'] and chat.username:
+                # Канал кушода аст - бо username линк сохтан
+                channel_link = f"https://t.me/{chat.username}"
+            else:
+                # Канал пӯшида аст - бо channel_id линк сохтан
+                channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+        except:
+            # Агар хатогӣ рӯй диҳад, бо username линк сохтан
+            channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+        
         markup.add(types.InlineKeyboardButton(f"📢 {channel_name}", url=channel_link))
     
     # Тугмаи санҷиши обуна
@@ -284,7 +416,7 @@ def show_subscription_requirement(message, movie_id=None):
     text = "📺 Барои тамошои филм аввал ба каналҳои зерин обуна шавед:\n\n"
     for i, (channel_id, channel_name) in enumerate(channels, 1):
         text += f"{i}️⃣ {channel_name}\n"
-    text += "\nБаъд аз обуна шудан, тугмаи 'Санҷиши обуна'-ро пахш кунед."
+    text += "\n💡 **Эзоҳ:** Тугмаро пахш кунед ва баъд аз обуна шудан, 'Санҷиши обуна'-ро пахш кунед."
     
     bot.send_message(message.chat.id, text, reply_markup=markup)
 
@@ -293,7 +425,7 @@ def check_subscription_callback(call):
     user_id = call.from_user.id
     
     if check_all_subscriptions(user_id):
-        bot.answer_callback_query(call.id, "✅ Шумо ба ҳарду канал обуна шудаед!")
+        bot.answer_callback_query(call.id, "✅ Шумо ба ҳамаи каналҳо обуна шудаед!")
         
         # Агар movie_id дошта бошем, филмро фиристем
         if call.data.startswith('check_sub_') and len(call.data.split('_')) > 2:
@@ -315,7 +447,7 @@ def check_subscription_callback(call):
                         )
         else:
             bot.edit_message_text(
-                "✅ Шумо ба ҳарду канал обуна шудаед!\n\n"
+                "✅ Шумо ба ҳамаи каналҳо обуна шудаед!\n\n"
                 "Акнун метавонед филмҳоро тамошо кунед.",
                 call.message.chat.id,
                 call.message.message_id,
@@ -329,6 +461,45 @@ def check_subscription_callback(call):
             )
     else:
         bot.answer_callback_query(call.id, "❌ Шумо ҳанӯз ба ҳамаи каналҳо обуна нашудаед!")
+        
+        # Нишон додани каналҳоеки обуна нашудаанд
+        channels = get_active_channels()
+        unsubscribed = []
+        
+        for channel_id, channel_name in channels:
+            if not check_subscription(user_id, channel_id):
+                unsubscribed.append((channel_id, channel_name))
+        
+        if unsubscribed:
+            text = "❌ Шумо ба ин каналҳо ҳанӯз обуна нашудаед:\n\n"
+            markup = types.InlineKeyboardMarkup()
+            
+            for channel_id, channel_name in unsubscribed:
+                text += f"📢 {channel_name}\n"
+                
+                # Санҷиш оё канал кушода аст
+                try:
+                    chat = bot.get_chat(channel_id)
+                    if chat.type in ['channel', 'supergroup'] and chat.username:
+                        # Канал кушода аст - бо username линк сохтан
+                        channel_link = f"https://t.me/{chat.username}"
+                    else:
+                        # Канал пӯшида аст - бо channel_id линк сохтан
+                        channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+                except:
+                    # Агар хатогӣ рӯй диҳад, бо username линк сохтан
+                    channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+                
+                markup.add(types.InlineKeyboardButton(f"📢 {channel_name}", url=channel_link))
+            
+            markup.add(types.InlineKeyboardButton("✅ Санҷиши обуна", callback_data="check_sub_general"))
+            
+            bot.edit_message_text(
+                text,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup
+            )
 
 # Командаҳои админ
 @bot.message_handler(commands=['admin'])
@@ -481,7 +652,11 @@ def channel_management_callback(call):
     if call.data == 'add_channel':
         bot.send_message(
             call.message.chat.id,
-            "➕ ID-и канали навро нависед (мисол: @channel_name):"
+            "➕ Линк ё ID-и канали навро нависед:\n\n"
+            "💡 **Имкониятҳо:**\n"
+            "• Линки канал: https://t.me/my_channel\n"
+            "• Никнейми канал: @my_channel\n\n"
+            "✅ Ҳардуиашон кор мекунанд (каналҳои кушода ва пӯшида)"
         )
         bot.register_next_step_handler(call.message, process_channel_id)
     
@@ -533,14 +708,35 @@ def remove_channel_callback(call):
     )
 
 def process_channel_id(message):
-    channel_id = message.text.strip()
+    channel_input = message.text.strip()
     
-    if not channel_id.startswith('@'):
-        bot.send_message(message.chat.id, "❌ ID-и канал бояд бо @ оғоз шавад. Мисол: @my_channel")
+    # Санҷиш оё ин линк аст
+    if channel_input.startswith('https://t.me/'):
+        # Аз линк username-ро гирифтан
+        channel_id = '@' + channel_input.split('/')[-1]
+        bot.send_message(message.chat.id, "📝 Номи каналро нависед:")
+        bot.register_next_step_handler(message, process_channel_name, channel_id)
         return
-    
-    bot.send_message(message.chat.id, "📝 Номи каналро нависед:")
-    bot.register_next_step_handler(message, process_channel_name, channel_id)
+    elif channel_input.startswith('t.me/'):
+        # Аз линк username-ро гирифтан
+        channel_id = '@' + channel_input.split('/')[-1]
+        bot.send_message(message.chat.id, "📝 Номи каналро нависед:")
+        bot.register_next_step_handler(message, process_channel_name, channel_id)
+        return
+    elif channel_input.startswith('@'):
+        # Никнейм дода шудааст
+        channel_id = channel_input
+        bot.send_message(message.chat.id, "📝 Номи каналро нависед:")
+        bot.register_next_step_handler(message, process_channel_name, channel_id)
+        return
+    else:
+        bot.send_message(
+            message.chat.id, 
+            "❌ Лутфан:\n"
+            "• Линки каналро фиристед (мисол: https://t.me/my_channel)\n"
+            "• Ё никнейми каналро нависед (мисол: @my_channel)"
+        )
+        return
 
 # Гирифтани ҳамаи корбарони фаъоли бот
 def get_all_users():
@@ -566,13 +762,20 @@ def process_channel_name(message, channel_id):
     try:
         # Санҷиши дастрасии канал
         chat = bot.get_chat(channel_id)
+        
+        # Агар канал кушода бошад, номи аслӣ гирифтан
+        if chat.type in ['channel', 'supergroup']:
+            if chat.title:
+                channel_name = chat.title
+        
         add_channel(channel_id, channel_name)
         
         bot.send_message(
             message.chat.id,
             f"✅ Канал бо муваффақият илова шуд!\n\n"
             f"📢 Ном: {channel_name}\n"
-            f"🆔 ID: {channel_id}\n\n"
+            f"🆔 ID: {channel_id}\n"
+            f"🔓 Навъ: {'Кушода' if chat.type in ['channel', 'supergroup'] else 'Пӯшида'}\n\n"
             f"🔄 Ҳамаи корбарон аз шарти нави обуна огоҳ карда мешаванд..."
         )
         
@@ -580,20 +783,41 @@ def process_channel_name(message, channel_id):
         notify_users_about_new_channel(channel_id, channel_name)
         
     except Exception as e:
+        # Агар канал пӯшида бошад ё бот админ набошад, аммо ҳамон тавр илова мекунем
+        add_channel(channel_id, channel_name)
+        
         bot.send_message(
             message.chat.id,
-            f"❌ Хатогӣ: Канал ёфт нашуд ё бот админ нест.\n\n"
-            f"Мутмаин шавед, ки:\n"
-            f"• ID дуруст аст\n"
-            f"• Бот дар канал админ аст"
+            f"✅ Канал илова шуд!\n\n"
+            f"📢 Ном: {channel_name}\n"
+            f"🆔 ID: {channel_id}\n"
+            f"🔒 Навъ: Пӯшида ё бот админ нест\n\n"
+            f"💡 **Эзоҳ:** Барои каналҳои пӯшида, корбарон бояд бо линк обуна шаванд.\n"
+            f"🔄 Ҳамаи корбарон аз шарти нави обуна огоҳ карда мешаванд..."
         )
+        
+        # Огоҳ кардани ҳамаи корбарон
+        notify_users_about_new_channel(channel_id, channel_name)
 
 def notify_users_about_new_channel(channel_id, channel_name):
     """Огоҳкунии ҳамаи корбарон дар бораи канали нав"""
     users = get_all_users()
     
     markup = types.InlineKeyboardMarkup()
-    channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+    
+    # Санҷиш оё канал кушода аст
+    try:
+        chat = bot.get_chat(channel_id)
+        if chat.type in ['channel', 'supergroup'] and chat.username:
+            # Канал кушода аст - бо username линк сохтан
+            channel_link = f"https://t.me/{chat.username}"
+        else:
+            # Канал пӯшида аст - бо channel_id линк сохтан
+            channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+    except:
+        # Агар хатогӣ рӯй диҳад, бо username линк сохтан
+        channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+    
     markup.add(types.InlineKeyboardButton(f"📢 Обуна ба {channel_name}", url=channel_link))
     markup.add(types.InlineKeyboardButton("✅ Санҷиши обуна", callback_data="check_new_sub"))
     
@@ -659,7 +883,20 @@ def check_new_subscription(call):
             
             for channel_id, channel_name in unsubscribed:
                 text += f"📢 {channel_name}\n"
-                channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+                
+                # Санҷиш оё канал кушода аст
+                try:
+                    chat = bot.get_chat(channel_id)
+                    if chat.type in ['channel', 'supergroup'] and chat.username:
+                        # Канал кушода аст - бо username линк сохтан
+                        channel_link = f"https://t.me/{chat.username}"
+                    else:
+                        # Канал пӯшида аст - бо channel_id линк сохтан
+                        channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+                except:
+                    # Агар хатогӣ рӯй диҳад, бо username линк сохтан
+                    channel_link = f"https://t.me/{channel_id[1:]}" if channel_id.startswith('@') else channel_id
+                
                 markup.add(types.InlineKeyboardButton(f"📢 {channel_name}", url=channel_link))
             
             markup.add(types.InlineKeyboardButton("✅ Санҷиши обуна", callback_data="check_new_sub"))
@@ -1106,10 +1343,20 @@ def broadcast_confirmation_callback(call):
 # Обработчик барои тугмаи "Поиск по названию"
 @bot.message_handler(func=lambda message: message.text == "🔎 Поиск по названию")
 def search_by_title_button(message):
+    markup = types.InlineKeyboardMarkup()
+    
+    # Тугмаи фаъол кардани Inline Search дар чати ҷорӣ
+    markup.add(
+        types.InlineKeyboardButton(
+            f"🔍 Ҷустуҷӯи филмҳо",
+            switch_inline_query_current_chat=""
+        )
+    )
+    
     bot.send_message(
         message.chat.id,
-        "🔎 Номи филмро нависед:",
-        reply_markup=types.ForceReply()
+        "🔍 Барои ҷустуҷӯи филмҳо тугмаи зеринро пахш кунед:",
+        reply_markup=markup
     )
 
 # Обработчик барои тугмаи "Идораи каналҳо"
@@ -1323,8 +1570,19 @@ if __name__ == '__main__':
     print("🤖 Бот оғоз ёфт...")
     init_database()
     
-    try:
-        bot.polling(none_stop=True, interval=0, timeout=20)
-    except Exception as e:
-        logger.error(f"Хатогӣ: {e}")
-        print("❌ Хатогӣ дар кори бот!")
+    while True:
+        try:
+            print("🔄 Бот кор мекунад...")
+            bot.polling(none_stop=True, interval=1, timeout=20)
+        except Exception as e:
+            logger.error(f"Хатогӣ дар кори бот: {e}")
+            print(f"❌ Хатогӣ: {e}")
+            print("🔄 Бот дубора оғоз мешавад дар 10 сония...")
+            
+            import time
+            time.sleep(10)
+            
+            try:
+                bot.stop_polling()
+            except:
+                pass
